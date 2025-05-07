@@ -1,0 +1,264 @@
+# NACOS
+
+### 注册中心：
+
+```java
+@EnableDiscoveryClient
+```
+
+```yaml
+spring:
+  application:
+    name: xxx
+  cloud:
+    nacos:
+      server-addr: 127.0.0.1:8848
+```
+
+eg：注册中心宕机，还能远程调用吗？
+
+nacos客户端会缓存一份服务实例在本地，所以是可以调用的。注意：必须发起一次远程调用，才会拉去该服务的实例列表
+
+
+
+### 配置中心：
+
+命名空间：
+
+group(项目):
+
+dataId（微服务）：
+
+
+
+创建bootstrap.yml引入读取配置中心
+
+```yml
+spring:
+  application:
+    name: xxx	配置的dataID
+  cloud:
+    nacos:
+      server-addr: 127.0.0.1:8848
+    config:
+      enable: true
+      server-addr: 
+      file-extension: yml #执行文本后缀
+      namespace: #nacos命名空间
+      group: DEFAULT_GROUP #nacos GROUP
+      refresh-enabled: true
+```
+
+
+
+刷新配置：
+
+1、@Value+@RefreshScope
+
+2、@ConfigurationProperties方式
+
+
+
+
+
+# OpenFeign
+
+内部调用：@FeignClient
+
+第三方接口：
+
+![](..\..\images\springCloud-fast\openFeign-other.png)
+
+
+
+### 超时控制：设置超时时间
+
+spring.cloud.openfeign.client.config.客户端名字.xxxx属性配置
+
+客户端可以为default
+
+connect-timeout：
+
+read-timeout：
+
+### 重试
+
+Retry重试器
+
+### 拦截器：
+
+1、request-interceptors:
+
+RequestInterceptor(feign.RequestInterceptor)
+
+2、或者将RequestInterceptor实现类放入容器中，也可以自动扫描到
+
+
+
+### Fallback
+
+兜底返回：需要整合Sentinel才能使用
+
+@FeignClinet(fallback=xxxx.class)
+
+加入sentinel依赖
+
+配置：feign.sentinel.enable=true
+
+# Sentinel(限流，熔断，降级)
+
+
+
+通过配置：
+
+hystrix也可以
+
+
+
+# Gateway
+
+spring-cloud-starter-gateway(响应式，推荐)
+
+spring-cloud-starter-gateway-mvc
+
+
+
+@EnableDiscoveryClient
+
+
+
+### 配置路由规则
+
+配置文件：
+
+predicate:断言
+
+uri:目的地
+
+Filter:过滤器
+
+**RouteDefinition**
+
+```yaml
+spring:
+  cloud:
+    gateway:
+      routes: 
+      	- id: order-route
+      	  uri: lb://service-order
+      	  predicates: 
+      	  	- Path=/api/order/**
+      	  filters:
+      	  metadata: 
+      	  order: 0
+   
+```
+
+#### 断言：
+
+断言工厂有很多。After,Before,Cookie,Header,Host,Path,Query ，RemoteAddr
+
+![](..\..\images\springCloud-fast\断言工厂.jpg)
+
+**编码：****自定义断言工厂：**
+
+<img src="..\..\images\springCloud-fast\自定义断言工厂.png" style="zoom:40%;" />
+
+RouterPredicateFactory前边是断言工厂的名字
+
+#### 过滤器Filter
+
+比如：路径重写RewritePath=/red/?<?<segment>.*>,/$\{segment}
+
+/api/order/abc=>/abc
+
+AddResponseHeader
+
+
+
+default-filters:
+
+会给所有服务都添加filter
+
+**GlobalFIlter：**
+
+实现GlobalFilter即可，只需要放到Spring容器中，不需要做任何配置即可生效
+
+Mono方法：chain.dofilter(exchange).**dofinally**((result)-{这里面才是执行filter放行后的后置逻辑});
+
+**自定义网关过滤器工程**
+
+<img src="..\..\images\springCloud-fast\自定义过滤器工厂.png" style="zoom:50%;" />
+
+
+
+
+
+#### 全局跨域
+
+@CrossOrigin 太麻烦，每个Controller都要写
+
+```yaml
+spring: 
+  clound: 
+  	gateway: 
+  	  globalcors: 
+  	  	cors-configurations: 
+  	  	  '[/**]':
+  	  	  	allowedOrigins: "https://docs.spring.io"
+  	  	  	allowedMethods:
+  	  	  	  - GET
+```
+
+单独某个微服务的跨域配置，就在单独每个微服务下的**metadata**下的**cros**配置
+
+# Seata分布式事务
+
+普通jdbc事务：
+
+![](..\..\images\springCloud-fast\jdbc事务.png)
+
+
+
+
+
+运行seata服务端
+
+
+
+```yaml
+seata: 
+  tx-service-group: default_tx_group
+```
+
+每个微服务创建一个file.config文件
+
+事务入口添加：@GlobalTransactional
+
+**二阶段提交** 配合undolog
+
+​	注册全局事务，生成全局事务XID
+
+​	全局事务开始
+
+​	**第一阶段（本地事务）**：1、解析sql
+
+​						2、查询前镜像，拿到where条件，生成查询，定位数据
+
+​						3、执行业务sql
+
+​						4、查询后镜像，根据id查询
+
+​						5、查询回滚日志表，给undo_log表中插入前后镜像组成的回滚日志
+
+​						6、注册分支事务，申请storage_tbl表1号记录的全局锁
+
+​						7、本地事务提交：业务数据+undo_log一起保存
+
+​	**第二阶段**	：**分支提交**，收到TC(事务协调器)提交请求，立即相应OK；给异步队列中添加异步任务；异步和批量删除相应undoLog记录
+
+​						**分支回滚**：收到TC回滚请求，开启一个本地事务：找到undolog日志，通过XID，branchID
+
+​											数据校验：后镜像与当前数据是否一致，如果不一致，则说明被其他渠道修改了，需要配置相应策略，如果一致说明一切ok，
+
+​						**回滚数据**：获取undolog前镜像数据，执行修改，完成后删除undolog

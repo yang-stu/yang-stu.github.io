@@ -1,0 +1,19 @@
+#### 1、top
+
+找到cpu耗用最高的pid
+
+#### 2、top -H -p 进程PID
+
+找到最耗用的线程
+
+
+
+#### 3、将线程id转为16进制
+
+```
+printf '0x%x\n' 线程PID
+```
+
+
+
+#### 4、jstack 进程PID |grep16进制线程PID -A 20
